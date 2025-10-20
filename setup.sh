@@ -2,6 +2,53 @@
 
 set -e
 
+while true; do
+    read -rp "Enter Wi-Fi SSID (network name): " WIFI_SSID
+    if [[ -n "$WIFI_SSID" ]]; then
+        echo "Using SSID: $WIFI_SSID"
+        break
+    else
+        echo "SSID cannot be empty!"
+    fi
+done
+
+while true; do
+    read -rsp "Enter Wi-Fi password: " WIFI_PASS
+    echo
+    if [[ -n "$WIFI_PASS" ]]; then
+            echo "Password accepted."
+            break
+    else
+        echo "Password cannot be empty!"
+    fi
+done
+
+DEFAULT_IFACE="wlan0"
+while true; do
+    read -rp "Enter Wi-Fi interface name [default: $DEFAULT_IFACE]: " WIFI_IFACE
+    WIFI_IFACE=${WIFI_IFACE:-$DEFAULT_IFACE}
+
+    if ip link show "$WIFI_IFACE" &>/dev/null; then
+        echo "Using interface: $WIFI_IFACE"
+        break
+    else
+        echo "Interface '$WIFI_IFACE' not found. Available wireless interfaces:"
+        iw dev 2>/dev/null | awk '/Interface/ {print $2}' || ip -brief link show
+        echo "If your wireless interface has a different name, enter it now. To try again with default, press Enter."
+    fi
+done
+
+echo "Configuring Wi-Fi connection '$WIFI_SSID' via NetworkManager..."
+sudo nmcli connection add type wifi ifname "$WIFI_IFACE" con-name "$WIFI_SSID" ssid "$WIFI_SSID" || true
+sudo nmcli connection modify "$WIFI_SSID" wifi-sec.key-mgmt wpa-psk
+sudo nmcli connection modify "$WIFI_SSID" wifi-sec.psk "$WIFI_PASS"
+sudo nmcli connection modify "$WIFI_SSID" connection.autoconnect yes
+sudo nmcli connection modify "$WIFI_SSID" connection.autoconnect-priority 100
+sudo nmcli connection modify "$WIFI_SSID" ipv4.method auto ipv6.method auto
+
+echo "Attempting to connect to Wi-Fi (may fail if AP not in range)..."
+sudo nmcli device wifi connect "$WIFI_SSID" password "$WIFI_PASS" ifname "$WIFI_IFACE" || true
+
 # Prompt user for URL (default: http://127.0.0.1:3000)
 while true; do
     read -rp "Enter the Kiosk URL (must start with http:// or https://) [default: http://127.0.0.1:3000]: " KIOSK_URL
