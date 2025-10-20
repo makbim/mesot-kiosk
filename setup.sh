@@ -21,8 +21,6 @@ echo "### Updating system and installing required packages..."
 sudo apt update && sudo apt upgrade -y
 sudo apt install -y snapd sway
 
-curl -fsSL https://bun.sh/install | bash
-
 echo "### Installing Chromium (Snap)..."
 sudo snap install chromium
 
@@ -56,9 +54,6 @@ seat * {
 input * {
     xkb_layout us
 }
-
-# Start local Bun server before Chromium
-exec_always bash -c "bun run ~/build/index.js & sleep 5"
 
 # Launch Chromium in kiosk mode
 exec_always chromium \\
