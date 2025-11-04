@@ -1,7 +1,7 @@
 {
   "profiles": {
     "hal": {
-      "version": "0.0.4",
+      "version": "0.0.5",
       "url": "http://81.17.101.112:7000",
       "wifi": {
         "ssid": "LEGBA",
