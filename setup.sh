@@ -111,45 +111,15 @@ EOF
 echo "### Writing Sway configuration..."
 sudo -u kiosk mkdir -p /home/kiosk/.config/sway
 sudo tee /home/kiosk/.config/sway/config > /dev/null << EOF
-# Sway config for kiosk ($PROFILE v$VERSION)
-
 seat * { hide_cursor 0 }
 
 input * { xkb_layout us }
 
-exec_always chromium \\
-    --kiosk \\
-    --noerrdialogs \\
-    --no-first-run \\
-    --disable-features=TranslateUI \\
-    --app="$KIOSK_URL" \\
-    --enable-features=UseOzonePlatform \\
-    --ozone-platform=wayland \\
-    --disable-gpu
-EOF
-
-sudo tee -a /home/kiosk/.profile > /dev/null << EOF
-
-# Auto-start sway on tty1
-if [ -z "\$DISPLAY" ] && [ "\$(tty)" = "/dev/tty1" ]; then
-    exec sway
-fi
-EOF
-
-sudo chown -R kiosk:kiosk /home/kiosk/.config
-sudo chmod -R 700 /home/kiosk/.config
-
-echo "### Saving active profile info..."
-echo "$PROFILE" | sudo tee /var/lib/mesot-kiosk/active_profile >/dev/null
-echo "$VERSION" | sudo tee /var/lib/mesot-kiosk/version >/dev/null
-
-echo "### Installing version check service..."
-sudo mkdir -p /opt/mesot-kiosk
-sudo tee "$CHECK_SCRIPT" > /dev/null << 'EOF'
-#!/bin/bash
+exec_always bash -c '
 CONFIG_URL="https://raw.githubusercontent.com/makbim/mesot-kiosk/main/config.json"
 LOCAL_PROFILE_FILE="/var/lib/mesot-kiosk/active_profile"
 LOCAL_VERSION_FILE="/var/lib/mesot-kiosk/version"
+CONFIG_PATH="/opt/mesot-kiosk/config.json"
 LOG_FILE="/var/log/mesot-kiosk-version.log"
 CONFIG_TMP="/tmp/mesot-config.json"
 
@@ -168,8 +138,7 @@ if ! curl -fsSL "$CONFIG_URL" -o "$CONFIG_TMP"; then
   exit 0
 fi
 
-REMOTE_VERSION=$(jq -r --arg p "$PROFILE" '.profiles[$p].version' "$CONFIG_TMP")
-CHECK_INTERVAL=$(jq -r '.global.check_interval_seconds // 60' "$CONFIG_TMP")
+REMOTE_VERSION=$(jq -r --arg p "$PROFILE" ".profiles[$p].version" "$CONFIG_TMP")
 
 if [ -z "$REMOTE_VERSION" ] || [ "$REMOTE_VERSION" = "null" ]; then
   echo "$(date) [ERROR] Profile '$PROFILE' not found remotely" >> "$LOG_FILE"
@@ -177,47 +146,45 @@ if [ -z "$REMOTE_VERSION" ] || [ "$REMOTE_VERSION" = "null" ]; then
 fi
 
 if [ "$REMOTE_VERSION" != "$LOCAL_VERSION" ]; then
-  echo "$(date) [INFO] New version found for '$PROFILE': $REMOTE_VERSION (current: $LOCAL_VERSION)" >> "$LOG_FILE"
-  # Optional auto-update actions:
-  # sudo apt update -y && sudo apt upgrade -y
-  # echo "$REMOTE_VERSION" | sudo tee "$LOCAL_VERSION_FILE" >/dev/null
-  # echo "$(date) [ACTION] Rebooting to apply new version..." >> "$LOG_FILE"
-  # sudo reboot
+  echo "$(date) [INFO] Updating from $LOCAL_VERSION to $REMOTE_VERSION for profile $PROFILE" >> "$LOG_FILE"
+  sudo cp "$CONFIG_TMP" "$CONFIG_PATH"
+  echo "$REMOTE_VERSION" | sudo tee "$LOCAL_VERSION_FILE" >/dev/null
+  echo "$(date) [OK] Updated config applied." >> "$LOG_FILE"
 else
   echo "$(date) [OK] No new version ($LOCAL_VERSION)" >> "$LOG_FILE"
 fi
+
+KIOSK_URL=$(jq -r --arg p "$PROFILE" ".profiles[$p].url" "$CONFIG_PATH")
+
+chromium \
+  --kiosk \
+  --noerrdialogs \
+  --no-first-run \
+  --disable-features=TranslateUI \
+  --app="$KIOSK_URL" \
+  --enable-features=UseOzonePlatform \
+  --ozone-platform=wayland \
+  --disable-gpu
+'
 EOF
 
-sudo chmod +x "$CHECK_SCRIPT"
 
-sudo tee /etc/systemd/system/mesot-version-check.service > /dev/null << EOF
-[Unit]
-Description=Mesot Kiosk Version Check
-After=network-online.target
+sudo tee -a /home/kiosk/.profile > /dev/null << EOF
 
-[Service]
-Type=oneshot
-ExecStart=$CHECK_SCRIPT
+# Auto-start sway on tty1
+if [ -z "\$DISPLAY" ] && [ "\$(tty)" = "/dev/tty1" ]; then
+    exec sway
+fi
 EOF
 
-sudo tee /etc/systemd/system/mesot-version-check.timer > /dev/null << EOF
-[Unit]
-Description=Run Mesot Version Check periodically
+sudo chown -R kiosk:kiosk /home/kiosk/.config
+sudo chmod -R 700 /home/kiosk/.config
 
-[Timer]
-OnBootSec=30
-OnUnitActiveSec=40s
-Persistent=true
-
-[Install]
-WantedBy=timers.target
-EOF
-
-sudo systemctl daemon-reload
-sudo systemctl enable mesot-version-check.timer
-sudo systemctl start mesot-version-check.timer
+echo "### Saving active profile info..."
+echo "$PROFILE" | sudo tee /var/lib/mesot-kiosk/active_profile >/dev/null
+echo "$VERSION" | sudo tee /var/lib/mesot-kiosk/version >/dev/null
 
 echo "### Setup complete (Profile: $PROFILE, Version: $VERSION)"
-echo "Chromium kiosk will run and version control will continue in background."
+echo "Chromium kiosk will run in background."
 echo "Rebooting..."
 sudo reboot
