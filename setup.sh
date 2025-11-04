@@ -55,7 +55,7 @@ ExecStart=-/sbin/agetty --autologin kiosk --noclear %I \$TERM
 Type=idle
 EOF
 
-DEFAULT_IFACE="wlan0"
+DEFAULT_IFACE="wlp3s0"
 WIFI_IFACE=${DEFAULT_IFACE}
 
 echo "### Configuring Wi-Fi connection '$WIFI_SSID'..."
@@ -124,7 +124,7 @@ if [ "$CURRENT_VERSION" != "$PROFILE_VERSION" ]; then
     echo "Profile version changed. Updating Wi-Fi and Kiosk URL..."
     echo "$PROFILE_VERSION" | sudo tee "$VERSION_FILE" > /dev/null
 
-    DEFAULT_IFACE="wlan0"
+    DEFAULT_IFACE="wlp3s0"
     WIFI_IFACE=${DEFAULT_IFACE}
 
     sudo nmcli connection add type wifi ifname "$WIFI_IFACE" con-name "$WIFI_SSID" ssid "$WIFI_SSID" || true
