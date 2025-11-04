@@ -1,96 +1,43 @@
 #!/bin/bash
 set -e
 
-CONFIG_PATH="/opt/mesot-kiosk/config.json"
 CONFIG_URL="https://raw.githubusercontent.com/makbim/mesot-kiosk/main/config.json"
-CHECK_SCRIPT="/opt/mesot-kiosk/check_version.sh"
+CONFIG_PATH="/tmp/mesot-config.json"
+VERSION_FILE="/etc/mesot-kiosk-version"
+PROFILE_FILE="/etc/mesot-kiosk-profile"
+UPDATE_SCRIPT="/usr/local/bin/mesot-kiosk-update.sh"
 
-echo "### Checking prerequisites..."
-if ! command -v jq &>/dev/null; then
-    echo "Installing jq..."
-    sudo apt update -y
-    sudo apt install -y jq
-fi
-
-sudo mkdir -p "$(dirname "$CONFIG_PATH")"
-sudo mkdir -p /opt/mesot-kiosk
-sudo mkdir -p /var/lib/mesot-kiosk
-sudo mkdir -p /var/log
-
-if [ ! -f "$CONFIG_PATH" ]; then
-    echo "Downloading config.json..."
-    sudo curl -fsSL "$CONFIG_URL" -o "$CONFIG_PATH"
-else
-    echo "Found existing config.json"
-fi
+echo "### Downloading configuration..."
+curl -sSL "$CONFIG_URL" -o "$CONFIG_PATH"
 
 echo "Available profiles:"
 jq -r '.profiles | keys[]' "$CONFIG_PATH"
 
-while true; do
-    read -rp "Enter profile name: " PROFILE
-    if jq -e --arg p "$PROFILE" '.profiles[$p]' "$CONFIG_PATH" >/dev/null; then
-        echo "Using profile: $PROFILE"
-        break
-    else
-        echo "Invalid profile! Try again."
-    fi
-done
-
-WIFI_SSID=$(jq -r --arg p "$PROFILE" '.profiles[$p].wifi.ssid' "$CONFIG_PATH")
-WIFI_PASS=$(jq -r --arg p "$PROFILE" '.profiles[$p].wifi.password' "$CONFIG_PATH")
-KIOSK_URL=$(jq -r --arg p "$PROFILE" '.profiles[$p].url' "$CONFIG_PATH")
-VERSION=$(jq -r --arg p "$PROFILE" '.profiles[$p].version' "$CONFIG_PATH")
-
-echo
-echo "Profile details:"
-echo " - Version: $VERSION"
-echo " - Wi-Fi SSID: $WIFI_SSID"
-echo " - URL: $KIOSK_URL"
-echo
-
-read -rp "Proceed with these settings? [Y/n]: " CONFIRM
-CONFIRM=${CONFIRM:-Y}
-if [[ ! "$CONFIRM" =~ ^[Yy]$ ]]; then
-    echo "Setup cancelled."
-    exit 1
+if [ -f "$PROFILE_FILE" ]; then
+    PROFILE=$(cat "$PROFILE_FILE")
+else
+    while true; do
+        read -rp "Select a profile from above: " PROFILE
+        if jq -e ".profiles[\"$PROFILE\"]" "$CONFIG_PATH" &>/dev/null; then
+            echo "$PROFILE" | sudo tee "$PROFILE_FILE" > /dev/null
+            break
+        else
+            echo "Profile '$PROFILE' not found! Try again."
+        fi
+    done
 fi
 
-DEFAULT_IFACE="wlan0"
-while true; do
-    read -rp "Enter Wi-Fi interface name [default: $DEFAULT_IFACE]: " WIFI_IFACE
-    WIFI_IFACE=${WIFI_IFACE:-$DEFAULT_IFACE}
-    if ip link show "$WIFI_IFACE" &>/dev/null; then
-        echo "Using interface: $WIFI_IFACE"
-        break
-    else
-        echo "Interface '$WIFI_IFACE' not found. Available interfaces:"
-        iw dev 2>/dev/null | awk '/Interface/ {print $2}' || ip -brief link show
-    fi
-done
+PROFILE_VERSION=$(jq -r ".profiles[\"$PROFILE\"].version" "$CONFIG_PATH")
+WIFI_SSID=$(jq -r ".profiles[\"$PROFILE\"].wifi.ssid" "$CONFIG_PATH")
+WIFI_PASS=$(jq -r ".profiles[\"$PROFILE\"].wifi.password" "$CONFIG_PATH")
+KIOSK_URL=$(jq -r ".profiles[\"$PROFILE\"].url" "$CONFIG_PATH")
 
-echo "### Configuring Wi-Fi..."
+echo "### Updating system and installing required packages..."
+sudo apt update && sudo apt upgrade -y
+sudo apt install -y snapd sway jq curl
 
-EXISTING_CONNS=$(nmcli -t -f NAME connection show | grep -Fx "$WIFI_SSID" || true)
-if [ -n "$EXISTING_CONNS" ]; then
-    echo "Removing existing Wi-Fi connections named '$WIFI_SSID'..."
-    nmcli connection delete "$WIFI_SSID" || true
-fi
-
-sudo nmcli connection add type wifi ifname "$WIFI_IFACE" con-name "$WIFI_SSID" ssid "$WIFI_SSID" || true
-sudo nmcli connection modify "$WIFI_SSID" wifi-sec.key-mgmt wpa-psk
-sudo nmcli connection modify "$WIFI_SSID" wifi-sec.psk "$WIFI_PASS"
-sudo nmcli connection modify "$WIFI_SSID" connection.autoconnect yes
-sudo nmcli connection modify "$WIFI_SSID" connection.autoconnect-priority 100
-sudo nmcli connection modify "$WIFI_SSID" ipv4.method auto ipv6.method auto
-sudo nmcli device wifi connect "$WIFI_SSID" password "$WIFI_PASS" ifname "$WIFI_IFACE" || true
-
-echo "### Installing dependencies..."
-sudo apt update -y && sudo apt upgrade -y
-sudo apt install -y snapd sway curl jq
-
-echo "### Installing Chromium..."
-sudo snap install chromium
+echo "### Installing Chromium (Snap)..."
+sudo snap install chromium || true
 
 echo "### Creating kiosk user..."
 if ! id "kiosk" &>/dev/null; then
@@ -99,7 +46,7 @@ else
     echo "User 'kiosk' already exists, skipping..."
 fi
 
-echo "### Configuring autologin..."
+echo "### Configuring automatic login..."
 sudo mkdir -p /etc/systemd/system/getty@tty1.service.d/
 sudo tee /etc/systemd/system/getty@tty1.service.d/override.conf > /dev/null << EOF
 [Service]
@@ -108,70 +55,38 @@ ExecStart=-/sbin/agetty --autologin kiosk --noclear %I \$TERM
 Type=idle
 EOF
 
-echo "### Writing Sway configuration..."
+DEFAULT_IFACE="wlan0"
+WIFI_IFACE=${DEFAULT_IFACE}
+
+echo "### Configuring Wi-Fi connection '$WIFI_SSID'..."
+sudo nmcli connection add type wifi ifname "$WIFI_IFACE" con-name "$WIFI_SSID" ssid "$WIFI_SSID" || true
+sudo nmcli connection modify "$WIFI_SSID" wifi-sec.key-mgmt wpa-psk
+sudo nmcli connection modify "$WIFI_SSID" wifi-sec.psk "$WIFI_PASS"
+sudo nmcli connection modify "$WIFI_SSID" connection.autoconnect yes
+sudo nmcli connection modify "$WIFI_SSID" connection.autoconnect-priority 100
+sudo nmcli connection modify "$WIFI_SSID" ipv4.method auto ipv6.method auto
+sudo nmcli device wifi connect "$WIFI_SSID" password "$WIFI_PASS" ifname "$WIFI_IFACE" || true
+
+echo "### Setting up Sway configuration..."
 sudo -u kiosk mkdir -p /home/kiosk/.config/sway
 sudo tee /home/kiosk/.config/sway/config > /dev/null << EOF
 seat * { hide_cursor 0 }
 
 input * { xkb_layout us }
 
-exec_always bash -c '
-CONFIG_URL="https://raw.githubusercontent.com/makbim/mesot-kiosk/main/config.json"
-LOCAL_PROFILE_FILE="/var/lib/mesot-kiosk/active_profile"
-LOCAL_VERSION_FILE="/var/lib/mesot-kiosk/version"
-CONFIG_PATH="/opt/mesot-kiosk/config.json"
-LOG_FILE="/var/log/mesot-kiosk-version.log"
-CONFIG_TMP="/tmp/mesot-config.json"
-
-mkdir -p /var/log
-
-if [ ! -f "$LOCAL_PROFILE_FILE" ] || [ ! -f "$LOCAL_VERSION_FILE" ]; then
-  echo "$(date) [WARN] Missing local profile/version files" >> "$LOG_FILE"
-  exit 0
-fi
-
-PROFILE=$(cat "$LOCAL_PROFILE_FILE")
-LOCAL_VERSION=$(cat "$LOCAL_VERSION_FILE")
-
-if ! curl -fsSL "$CONFIG_URL" -o "$CONFIG_TMP"; then
-  echo "$(date) [ERROR] Failed to fetch remote config" >> "$LOG_FILE"
-  exit 0
-fi
-
-REMOTE_VERSION=$(jq -r --arg p "$PROFILE" ".profiles[$p].version" "$CONFIG_TMP")
-
-if [ -z "$REMOTE_VERSION" ] || [ "$REMOTE_VERSION" = "null" ]; then
-  echo "$(date) [ERROR] Profile '$PROFILE' not found remotely" >> "$LOG_FILE"
-  exit 0
-fi
-
-if [ "$REMOTE_VERSION" != "$LOCAL_VERSION" ]; then
-  echo "$(date) [INFO] Updating from $LOCAL_VERSION to $REMOTE_VERSION for profile $PROFILE" >> "$LOG_FILE"
-  sudo cp "$CONFIG_TMP" "$CONFIG_PATH"
-  echo "$REMOTE_VERSION" | sudo tee "$LOCAL_VERSION_FILE" >/dev/null
-  echo "$(date) [OK] Updated config applied." >> "$LOG_FILE"
-else
-  echo "$(date) [OK] No new version ($LOCAL_VERSION)" >> "$LOG_FILE"
-fi
-
-KIOSK_URL=$(jq -r --arg p "$PROFILE" ".profiles[$p].url" "$CONFIG_PATH")
-
-chromium \
-  --kiosk \
-  --noerrdialogs \
-  --no-first-run \
-  --disable-features=TranslateUI \
-  --app="$KIOSK_URL" \
-  --enable-features=UseOzonePlatform \
-  --ozone-platform=wayland \
-  --disable-gpu
-'
+exec_always chromium \\
+    --kiosk \\
+    --noerrdialogs \\
+    --no-first-run \\
+    --disable-features=TranslateUI \\
+    --app="$KIOSK_URL" \\
+    --enable-features=UseOzonePlatform \\
+    --ozone-platform=wayland \\
+    --disable-gpu
 EOF
-
 
 sudo tee -a /home/kiosk/.profile > /dev/null << EOF
 
-# Auto-start sway on tty1
 if [ -z "\$DISPLAY" ] && [ "\$(tty)" = "/dev/tty1" ]; then
     exec sway
 fi
@@ -180,11 +95,100 @@ EOF
 sudo chown -R kiosk:kiosk /home/kiosk/.config
 sudo chmod -R 700 /home/kiosk/.config
 
-echo "### Saving active profile info..."
-echo "$PROFILE" | sudo tee /var/lib/mesot-kiosk/active_profile >/dev/null
-echo "$VERSION" | sudo tee /var/lib/mesot-kiosk/version >/dev/null
+echo "$PROFILE_VERSION" | sudo tee "$VERSION_FILE" > /dev/null
 
-echo "### Setup complete (Profile: $PROFILE, Version: $VERSION)"
-echo "Chromium kiosk will run in background."
-echo "Rebooting..."
-sudo reboot
+echo "### Creating self-update script..."
+sudo tee "$UPDATE_SCRIPT" > /dev/null << 'EOF'
+#!/bin/bash
+set -e
+
+CONFIG_URL="https://raw.githubusercontent.com/makbim/mesot-kiosk/main/config.json"
+CONFIG_PATH="/tmp/mesot-config.json"
+VERSION_FILE="/etc/mesot-kiosk-version"
+PROFILE_FILE="/etc/mesot-kiosk-profile"
+
+curl -sSL "$CONFIG_URL" -o "$CONFIG_PATH"
+
+PROFILE=$(cat "$PROFILE_FILE")
+PROFILE_VERSION=$(jq -r ".profiles[\"$PROFILE\"].version" "$CONFIG_PATH")
+WIFI_SSID=$(jq -r ".profiles[\"$PROFILE\"].wifi.ssid" "$CONFIG_PATH")
+WIFI_PASS=$(jq -r ".profiles[\"$PROFILE\"].wifi.password" "$CONFIG_PATH")
+KIOSK_URL=$(jq -r ".profiles[\"$PROFILE\"].url" "$CONFIG_PATH")
+
+CURRENT_VERSION=""
+if [ -f "$VERSION_FILE" ]; then
+    CURRENT_VERSION=$(cat "$VERSION_FILE")
+fi
+
+if [ "$CURRENT_VERSION" != "$PROFILE_VERSION" ]; then
+    echo "Profile version changed. Updating Wi-Fi and Kiosk URL..."
+    echo "$PROFILE_VERSION" | sudo tee "$VERSION_FILE" > /dev/null
+
+    DEFAULT_IFACE="wlan0"
+    WIFI_IFACE=${DEFAULT_IFACE}
+
+    sudo nmcli connection add type wifi ifname "$WIFI_IFACE" con-name "$WIFI_SSID" ssid "$WIFI_SSID" || true
+    sudo nmcli connection modify "$WIFI_SSID" wifi-sec.key-mgmt wpa-psk
+    sudo nmcli connection modify "$WIFI_SSID" wifi-sec.psk "$WIFI_PASS"
+    sudo nmcli connection modify "$WIFI_SSID" connection.autoconnect yes
+    sudo nmcli connection modify "$WIFI_SSID" connection.autoconnect-priority 100
+    sudo nmcli connection modify "$WIFI_SSID" ipv4.method auto ipv6.method auto
+    sudo nmcli device wifi connect "$WIFI_SSID" password "$WIFI_PASS" ifname "$WIFI_IFACE" || true
+
+    sudo -u kiosk mkdir -p /home/kiosk/.config/sway
+    sudo tee /home/kiosk/.config/sway/config > /dev/null << EOC
+seat * { hide_cursor 0 }
+
+input * { xkb_layout us }
+
+exec_always chromium \\
+    --kiosk \\
+    --noerrdialogs \\
+    --no-first-run \\
+    --disable-features=TranslateUI \\
+    --app="$KIOSK_URL" \\
+    --enable-features=UseOzonePlatform \\
+    --ozone-platform=wayland \\
+    --disable-gpu
+EOC
+
+    sudo chown -R kiosk:kiosk /home/kiosk/.config
+    sudo chmod -R 700 /home/kiosk/.config
+
+else
+    echo "Profile version ($PROFILE_VERSION) ($) up-to-date."
+fi
+EOF
+
+sudo chmod +x "$UPDATE_SCRIPT"
+
+echo "### Creating systemd service and timer for auto-update..."
+sudo tee /etc/systemd/system/mesot-kiosk-update.service > /dev/null << EOF
+[Unit]
+Description=Kiosk auto-update
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=$UPDATE_SCRIPT
+EOF
+
+sudo tee /etc/systemd/system/mesot-kiosk-update.timer > /dev/null << EOF
+[Unit]
+Description=Run kiosk update
+
+[Timer]
+OnBootSec=5s
+OnUnitActiveSec=10s
+AccuracySec=1s
+Unit=mesot-kiosk-update.service
+
+[Install]
+WantedBy=timers.target
+EOF
+
+sudo systemctl daemon-reload
+sudo systemctl enable --now mesot-kiosk-update.timer
+
+echo "### Setup complete. Reboot system..."
