@@ -1,0 +1,24 @@
+{
+  "profiles": {
+    "hal": {
+      "version": "0.0.1",
+      "url": "http://81.17.101.112:7000",
+      "wifi": {
+        "ssid": "LEGBA",
+        "password": "2244224422"
+      }
+    },
+    "terminal": {
+      "version": "0.0.0",
+      "url": "http://81.17.101.112:3000",
+      "wifi": {
+        "ssid": "LEGBA",
+        "password": "2244224422"
+      }
+    }
+  },
+  "global": {
+    "check_interval_seconds": 40,
+    "force_https": false
+  }
+}
