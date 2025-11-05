@@ -102,11 +102,17 @@ sudo tee "$UPDATE_SCRIPT" > /dev/null << 'EOF'
 #!/bin/bash
 set -e
 
+LOGFILE="/var/log/mesot-kiosk-update.log"
+exec >> "$LOGFILE" 2>&1
+
+echo "### $(date): Starting kiosk update ###"
+
 CONFIG_URL="https://raw.githubusercontent.com/makbim/mesot-kiosk/main/config.json"
 CONFIG_PATH="/tmp/mesot-config.json"
 VERSION_FILE="/etc/mesot-kiosk-version"
 PROFILE_FILE="/etc/mesot-kiosk-profile"
 
+echo "Downloading configuration..."
 curl -sSL "$CONFIG_URL" -o "$CONFIG_PATH"
 
 PROFILE=$(cat "$PROFILE_FILE")
@@ -121,12 +127,13 @@ if [ -f "$VERSION_FILE" ]; then
 fi
 
 if [ "$CURRENT_VERSION" != "$PROFILE_VERSION" ]; then
-    echo "Profile version changed. Updating Wi-Fi and Kiosk URL..."
+    echo "$(date): Profile version changed ($CURRENT_VERSION → $PROFILE_VERSION). Updating Wi-Fi and Kiosk URL..."
     echo "$PROFILE_VERSION" | sudo tee "$VERSION_FILE" > /dev/null
 
     DEFAULT_IFACE="wlp3s0"
     WIFI_IFACE=${DEFAULT_IFACE}
 
+    echo "Configuring Wi-Fi connection '$WIFI_SSID'..."
     sudo nmcli connection add type wifi ifname "$WIFI_IFACE" con-name "$WIFI_SSID" ssid "$WIFI_SSID" || true
     sudo nmcli connection modify "$WIFI_SSID" wifi-sec.key-mgmt wpa-psk
     sudo nmcli connection modify "$WIFI_SSID" wifi-sec.psk "$WIFI_PASS"
@@ -135,6 +142,7 @@ if [ "$CURRENT_VERSION" != "$PROFILE_VERSION" ]; then
     sudo nmcli connection modify "$WIFI_SSID" ipv4.method auto ipv6.method auto
     sudo nmcli device wifi connect "$WIFI_SSID" password "$WIFI_PASS" ifname "$WIFI_IFACE" || true
 
+    echo "Updating Sway configuration..."
     sudo -u kiosk mkdir -p /home/kiosk/.config/sway
     sudo tee /home/kiosk/.config/sway/config > /dev/null << EOC
 seat * { hide_cursor 0 }
@@ -155,8 +163,9 @@ EOC
     sudo chown -R kiosk:kiosk /home/kiosk/.config
     sudo chmod -R 700 /home/kiosk/.config
 
+    echo "$(date): Update completed."
 else
-    echo "Profile version ($PROFILE_VERSION) ($) up-to-date."
+    echo "$(date): Profile version ($PROFILE_VERSION) up-to-date."
 fi
 EOF
 
