@@ -34,6 +34,7 @@ KIOSK_URL=$(jq -r ".profiles[\"$PROFILE\"].url" "$CONFIG_PATH")
 
 echo "### Updating system and installing required packages..."
 sudo apt update && sudo apt upgrade -y
+sudo systemctl disable systemd-networkd-wait-online.service && sudo systemctl mask systemd-networkd-wait-online.service
 sudo apt install -y snapd sway jq curl
 
 echo "### Installing Chromium (Snap)..."
