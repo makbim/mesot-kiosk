@@ -10,7 +10,7 @@
     },
     "terminal": {
       "version": "0.0.0",
-      "url": "http://81.17.101.112:3000",
+      "url": "https://mesot.makbim.dev",
       "wifi": {
         "ssid": "Drop It Like It's Hotspot",
         "password": "2244224422"
