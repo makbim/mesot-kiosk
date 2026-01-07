@@ -23,6 +23,38 @@
         "ssid": "LEGBA",
         "password": "2244224422"
       }
+    },
+    "tarsus-terminal": {
+      "version": "0.0.0",
+      "url": "https://tarsus.makbim.dev",
+      "wifi": {
+        "ssid": "LEGBA",
+        "password": "2244224422"
+      }
+    },
+    "gulnar-terminal": {
+      "version": "0.0.0",
+      "url": "https://gulnar.makbim.dev",
+      "wifi": {
+        "ssid": "LEGBA",
+        "password": "2244224422"
+      }
+    },
+    "silifke-terminal": {
+      "version": "0.0.0",
+      "url": "https://silifke.makbim.dev",
+      "wifi": {
+        "ssid": "LEGBA",
+        "password": "2244224422"
+      }
+    },
+    "anamur-terminal": {
+      "version": "0.0.0",
+      "url": "https://anamur.makbim.dev",
+      "wifi": {
+        "ssid": "LEGBA",
+        "password": "2244224422"
+      }
     }
   },
   "global": {
