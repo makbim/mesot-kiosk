@@ -15,6 +15,14 @@
         "ssid": "LEGBA",
         "password": "2244224422"
       }
+    },
+    "mut-terminal": {
+      "version": "0.0.0",
+      "url": "https://mut.makbim.dev",
+      "wifi": {
+        "ssid": "LEGBA",
+        "password": "2244224422"
+      }
     }
   },
   "global": {
